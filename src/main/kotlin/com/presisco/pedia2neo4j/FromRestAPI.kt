@@ -17,48 +17,21 @@ const val companyProduceRelation = "开发商"
 const val companyPublisherRelation = "发行商"
 
 val neo4jConf = mapOf(
-    "uri" to "bolt://10.144.48.95:7687",
-    "username" to "neo4j",
-    "password" to "experimental"
+        "uri" to "bolt://localhost:7687",
+        "username" to "neo4j",
+        "password" to "experimental"
 )
 val neo4jDriver = GraphDatabase.driver(
-    neo4jConf["uri"],
-    AuthTokens.basic(neo4jConf["username"], neo4jConf["password"]),
-    Config.defaultConfig()
+        neo4jConf["uri"],
+        AuthTokens.basic(neo4jConf["username"], neo4jConf["password"]),
+        Config.defaultConfig()
 )!!
 val session = neo4jDriver.session()!!
 val seedMentions = setOf("搜狗", "搜狗输入法", "搜狐", "搜狗浏览器")
-val entityIdMap = hashMapOf<String, Int>()
-val entityMentionMap = hashMapOf<String, String>()
+
+val finishedSet = hashSetOf<String>()
 
 fun String.json2Map() = MapHelper().fromJson(this)
-
-fun idFromCache(entity: String, name: String = entity): Int {
-    return if (!entityIdMap.containsKey(entity)) {
-        val id = session.writeTransaction {
-            it.run(
-                "merge (new:Entity{name: \$entity, shortName: \$name}) RETURN id(new)",
-                parameters("entity", entity, "name", name)
-            ).single()
-                .get(0)
-                .asInt()
-        }
-        entityIdMap[entity] = id
-        id
-    } else {
-        entityIdMap[entity]!!
-    }
-}
-
-fun createRelationBetweenIds(from: Int, to: Int, relation: String) {
-    session.writeTransaction {
-        it.run(
-            "match (from), (to)" +
-                    " where id(from) = $from and id(to) = $to" +
-                    " merge (from) - [rel:$relation] -> (to)"
-        )
-    }
-}
 
 fun Set<String>.toLabels() = if (this.isEmpty()) {
     ""
@@ -66,81 +39,99 @@ fun Set<String>.toLabels() = if (this.isEmpty()) {
     this.joinToString(prefix = ":", separator = ":")
 }
 
-fun createRelationsBetweenIdsWithLabel(
-    from: Int, fromLabels: Set<String>,
-    to: Int, toLabels: Set<String>,
-    relation: String
+fun mergeEntity(entity: String, labels: Set<String> = setOf()) = session.writeTransaction {
+    it.run(
+            "merge (new${labels.toLabels()}{name: \$name}) RETURN id(new)",
+            parameters("name", entity)
+    ).single()
+            .get(0)
+            .asInt()
+}
+
+fun createRelationBetweenIds(from: Int, to: Int, relation: String) {
+    session.writeTransaction {
+        it.run(
+                "match (from), (to)" +
+                        " where id(from) = $from and id(to) = $to" +
+                        " merge (from) - [rel:$relation] -> (to)"
+        )
+    }
+}
+
+fun createRelationFromIdToNameLabel(
+        fromId: Int,
+        toLabels: Set<String>, toName: String,
+        relation: String
 ) {
     session.writeTransaction {
         it.run(
-            "match (from${fromLabels.toLabels()}), (to${toLabels.toLabels()})" +
-                    " where id(from) = $from and id(to) = $to" +
-                    " merge (from) - [rel:$relation] -> (to)"
+                "match (from), (to${toLabels.toLabels()})" +
+                        " where id(from) = $fromId and to.name =~ '.*name.*'" +
+                        " merge (from) - [rel:$relation] -> (to)",
+                parameters("name", toName)
         )
     }
 }
 
-fun createMentionNode(entityName: String, mention: String) {
-    val entityId = idFromCache(entityName)
-    val mentionId = idFromCache(mention)
-    createRelationBetweenIds(entityId, mentionId, "简称 ")
-}
-
-fun setLabelsForId(id: Int, labels: Set<String>) {
-    session.writeTransaction {
-        it.run(
-            "match (node)" +
-                    " where id(node) = $id" +
-                    " set node:${labels.joinToString(separator = ":")}"
-        )
-    }
-}
-
-fun getEntitiesForMention(mention: String): List<String> {
+fun getEntitiesForMention(mention: String): Set<String> {
     val entities = (mentionUrl + mention)
-        .httpGet().responseString().third.component1()!!
-        .json2Map()["ret"] as List<String>
-    entities.forEach { entityMentionMap[it] = mention }
-    return entities
+            .httpGet().responseString().third.component1()!!
+            .json2Map()["ret"] as List<String>
+    println("entities for mention $mention: $entities")
+    return entities.toSet()
+}
+
+fun mergeEntityWithCache(name: String, labels: Set<String>): Int {
+    var id = Neo4jIdCache.idFor(name, labels)
+    if (id == -1) {
+        id = mergeEntity(name, labels)
+        Neo4jIdCache.addIdFor(name, labels, id)
+    }
+    return id
+}
+
+fun buildGraph(mention: String) {
+    val seedSet = getEntitiesForMention(mention)
+    val mapHelper = MapHelper()
+
+    val queueSet = seedSet.minus(finishedSet)
+    queueSet.forEach { seedWord ->
+        finishedSet.add(seedWord)
+        val json = (tripleUrl + seedWord).httpGet().responseString().third.component1()
+        val triples = mapHelper.fromJson(json!!)["ret"] as List<List<String>>
+        val labels = triples.filter { it[0] == entityLabelRelation }.map { it[1] }.toSet()
+        println("labels for $seedWord: $labels")
+
+        val fromId = mergeEntityWithCache(seedWord, labels)
+
+        triples.forEach { triple ->
+            val relation = triple[0]
+            val toEntity = triple[1]
+            println("creating '$seedWord' --'$relation'--> '$toEntity'")
+            val toLabels = when (relation) {
+                companyCreatorRelation -> {
+                    buildGraph(toEntity)
+                    setOf("经济人物")
+                }
+                companyProduceRelation, companyPublisherRelation -> {
+                    buildGraph(toEntity)
+                    setOf(companyLabel)
+                }
+                else -> setOf(relation)
+            }
+            val toId = mergeEntityWithCache(toEntity, toLabels)
+            createRelationBetweenIds(fromId, toId, relation)
+        }
+    }
 }
 
 fun main() {
-    val mapHelper = MapHelper()
-
-    val seedSet = hashSetOf<String>()
-    seedMentions.forEach { mention ->
-        seedSet.addAll(getEntitiesForMention(mention))
+    session.writeTransaction {
+        it.run("match (n) detach delete n")
     }
 
-    while (seedSet.isNotEmpty()) {
-        val seedWord = seedSet.first()
-        val json = (tripleUrl + seedWord).httpGet().responseString().third.component1()
-        val triples = mapHelper.fromJson(json!!)["ret"] as List<List<String>>
-        val fromId = idFromCache(seedWord, entityMentionMap[seedWord]!!)
-
-        val labels = hashSetOf<String>()
-
-        triples.forEach { triple ->
-            println("creating '$seedWord' --'${triple[0]}'--> '${triple[1]}'")
-            val toEntity = triple[1]
-            val toId = idFromCache(toEntity)
-            val relation = triple[0]
-            when (relation) {
-                entityLabelRelation -> labels.add(toEntity)
-                companyCreatorRelation -> seedSet.addAll(getEntitiesForMention(toEntity))
-                companyProduceRelation, companyPublisherRelation -> createRelationsBetweenIdsWithLabel(
-                    fromId, setOf(companyLabel),
-                    toId, setOf(),
-                    relation
-                )
-                else -> createRelationBetweenIds(fromId, toId, relation)
-            }
-        }
-
-        if (labels.isNotEmpty()) {
-            setLabelsForId(fromId, labels)
-        }
-        seedSet.remove(seedWord)
+    seedMentions.forEach { mention ->
+        buildGraph(mention)
     }
 
     println("finished!")
