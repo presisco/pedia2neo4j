@@ -108,15 +108,12 @@ fun buildGraph(mention: String) {
             val relation = triple[0]
             val toEntity = triple[1]
             println("creating '$seedWord' --'$relation'--> '$toEntity'")
+            when (relation) {
+                companyCreatorRelation, companyPublisherRelation, companyProduceRelation, "主办单位" -> buildGraph(toEntity)
+            }
             val toLabels = when (relation) {
-                companyCreatorRelation -> {
-                    buildGraph(toEntity)
-                    setOf("经济人物")
-                }
-                companyProduceRelation, companyPublisherRelation -> {
-                    buildGraph(toEntity)
-                    setOf(companyLabel)
-                }
+                companyCreatorRelation -> setOf("经济人物")
+                companyProduceRelation, companyPublisherRelation, "主办单位" -> setOf(companyLabel)
                 else -> setOf(relation)
             }
             val toId = mergeEntityWithCache(toEntity, toLabels)
