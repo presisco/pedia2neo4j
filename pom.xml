@@ -53,6 +53,21 @@
             <artifactId>fuel</artifactId>
             <version>2.1.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.27.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>3.3.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.presisco</groupId>
+            <artifactId>lazyjdbc</artifactId>
+            <version>1.2.1</version>
+        </dependency>
     </dependencies>
 
     <build>
