@@ -1,18 +1,16 @@
 package com.presisco.pedia2neo4j.cndbpedia
 
-import com.github.kittinunf.fuel.httpGet
-import com.presisco.pedia2neo4j.*
+import com.presisco.pedia2neo4j.Neo4jIdCache
+import com.presisco.pedia2neo4j.createRelationBetweenIds
+import com.presisco.pedia2neo4j.mergeEntity
+import com.presisco.pedia2neo4j.toLabels
 import org.neo4j.driver.v1.AuthTokens
 import org.neo4j.driver.v1.Config
 import org.neo4j.driver.v1.GraphDatabase
 import org.neo4j.driver.v1.Values
 
-abstract class AbstractSubjectGraph(
-    private val maxRequestPerSec: Int = 1
-) {
+abstract class AbstractSubjectGraph {
     companion object {
-        const val tripleUrl = "http://shuyantech.com/api/cndbpedia/avpair?q="
-        const val mentionUrl = "http://shuyantech.com/api/cndbpedia/ment2ent?q="
         const val entityLabelRelation = "CATEGORY_ZH"
     }
 
@@ -29,10 +27,6 @@ abstract class AbstractSubjectGraph(
     val session = neo4jDriver.session()!!
 
     val finishedSet = hashSetOf<String>()
-
-    var lastRequestMs = nowMs()
-
-    val safeInterval = 1000L / maxRequestPerSec
 
     abstract fun targetLabelsForRelation(labels: Set<String>, relation: String): Set<String>
 
@@ -53,25 +47,6 @@ abstract class AbstractSubjectGraph(
         }
     }
 
-    fun <ITEM> CNDBPediaRequest(url: String, keyword: String): List<ITEM> {
-        if (nowMs() - lastRequestMs < safeInterval) {
-            println("sleep for ${nowMs() - lastRequestMs} ms")
-            Thread.sleep(nowMs() - lastRequestMs)
-        }
-        val result = (url + keyword)
-            .httpGet().responseString().third.component1()!!
-            .json2Map()
-        if (!result.containsKey("ret")) {
-            throw IllegalStateException("request for $url$keyword failed! response: $result")
-        }
-        lastRequestMs = nowMs()
-        return result["ret"] as List<ITEM>
-    }
-
-    fun getEntitiesForMention(mention: String) = CNDBPediaRequest<String>(mentionUrl, mention).toSet()
-
-    fun getTriplesForEntity(entity: String) = CNDBPediaRequest<List<String>>(tripleUrl, entity)
-
     fun mergeEntityWithCache(name: String, labels: Set<String>): Int {
         var id = Neo4jIdCache.idFor(name, labels)
         if (id == -1) {
@@ -82,7 +57,7 @@ abstract class AbstractSubjectGraph(
     }
 
     fun startWithEntity(entity: String) {
-        val triples = getTriplesForEntity(entity)
+        val triples = APIRequestCache.getAVPair(entity)
         val labels = triples.filter { it[0] == entityLabelRelation }.map { it[1] }.toSet()
         println("labels for $entity: $labels")
 
@@ -102,7 +77,7 @@ abstract class AbstractSubjectGraph(
     }
 
     fun startWithMention(mention: String) {
-        val seedSet = getEntitiesForMention(mention)
+        val seedSet = APIRequestCache.getMent2Ent(mention)
 
         val queueSet = seedSet.minus(finishedSet)
         queueSet.forEach { seedWord ->
