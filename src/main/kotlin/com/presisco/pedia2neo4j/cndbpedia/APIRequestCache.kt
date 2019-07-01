@@ -24,7 +24,7 @@ object APIRequestCache {
     const val tripleUrl = "http://shuyantech.com/api/cndbpedia/avpair?q="
     const val mentionUrl = "http://shuyantech.com/api/cndbpedia/ment2ent?q="
 
-    val safeInterval = 1000L / 5
+    val safeInterval = 1000L / 1
 
     @Volatile
     var lastRequestMs = nowMs()
@@ -39,6 +39,7 @@ object APIRequestCache {
             val result = (url + keyword)
                 .httpGet().responseString().third.component1()!!
                 .json2Map()
+            lastRequestMs = nowMs()
             if (!result.containsKey("ret")) {
                 throw IllegalStateException("request for $url$keyword failed! response: $result")
             }
