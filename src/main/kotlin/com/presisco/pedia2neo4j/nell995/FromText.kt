@@ -26,15 +26,15 @@ object FromText : Neo4jGraph() {
         val triplesFile = if (args.isNotEmpty()) {
             args[0]
         } else {
-            "C:\\projects\\DeepPath-master\\NELL-995\\kb_env_rl.txt"
+            "C:\\projects\\DeepPath-master\\NELL-995\\tasks\\concept_athletehomestadium\\graph.txt"
         }
         val reader = File(triplesFile).bufferedReader()
         var line = reader.readLine()
         while (line != null) {
             val items = line.split("\t")
             val fromItem = items[0]
-            val toItem = items[1]
-            val relation = relationRegex.find(items[2])!!.groupValues[1]
+            val toItem = items[2]
+            val relation = relationRegex.find(items[1])!!.groupValues[1]
 
             val (fromLabel, fromEntity) = fromItem.getLabelAndEntity()
             val fromId = mergeEntityWithCache(fromEntity, setOf(fromLabel))
