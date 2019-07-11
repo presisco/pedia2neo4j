@@ -1,9 +1,13 @@
 package com.presisco.pedia2neo4j.nell995
 
 import com.presisco.pedia2neo4j.Neo4jGraph
+import com.presisco.pedia2neo4j.Neo4jIdCache
+import org.slf4j.LoggerFactory
 import java.io.File
 
 object FromText : Neo4jGraph() {
+    val logger = LoggerFactory.getLogger(FromText::class.java)
+
     val conceptRegex = "concept_(.+?)_(.+)".toRegex()
     val relationRegex = "concept:(.+)".toRegex()
 
@@ -42,6 +46,7 @@ object FromText : Neo4jGraph() {
 
             line = reader.readLine()
         }
+        logger.info("finished! wrote ${Neo4jIdCache.idList.size} nodes!")
         closeGraph()
     }
 

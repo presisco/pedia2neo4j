@@ -4,8 +4,10 @@ import org.neo4j.driver.v1.AuthTokens
 import org.neo4j.driver.v1.Config
 import org.neo4j.driver.v1.GraphDatabase
 import org.neo4j.driver.v1.Values
+import org.slf4j.LoggerFactory
 
 abstract class Neo4jGraph {
+    private val logger = LoggerFactory.getLogger(Neo4jGraph::class.java)
 
     val neo4jConf = mapOf(
         "uri" to "bolt://localhost:7687",
@@ -48,9 +50,11 @@ abstract class Neo4jGraph {
 
 
     fun clearGraph() {
+        logger.info("deleting graph")
         session.writeTransaction {
             it.run("match (n) detach delete n")
         }
+        logger.info("graph deleted")
     }
 
     fun closeGraph() {
