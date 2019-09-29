@@ -10,7 +10,7 @@ import org.neo4j.driver.v1.Config
 import org.neo4j.driver.v1.GraphDatabase
 
 val neo4jConf = mapOf(
-    "uri" to "bolt://localhost:7687",
+    "uri" to "bolt://http://10.144.48.95:7687",
     "username" to "neo4j",
     "password" to "experimental"
 )
