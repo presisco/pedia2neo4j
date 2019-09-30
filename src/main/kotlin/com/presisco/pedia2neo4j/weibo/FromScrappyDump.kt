@@ -4,6 +4,7 @@ import com.presisco.lazyjdbc.client.MapJdbcClient
 import com.presisco.pedia2neo4j.*
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import java.util.*
 
 object FromScrappyDump {
 
@@ -26,7 +27,7 @@ object FromScrappyDump {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:D:/scrappy_weibo.db",
+                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -39,51 +40,79 @@ object FromScrappyDump {
 
     val roots = hashSetOf<Blog>()
 
+    init {
+        sqliteClient.executeSQL(
+            "create table if not exists blog(" +
+                    "mid text(9) not null primary key, " +
+                    "time text(16), " +
+                    "content text, " +
+                    "uid text not null, " +
+                    "like integer, " +
+                    "comment integer, " +
+                    "repost integer, " +
+                    "url text not null, " +
+                    "repost_id text(9), " +
+                    "repost_link text)"
+        )
+        sqliteClient.executeSQL(
+            "create table if not exists transfer_id(" +
+                    "max_id integer primary key)"
+        )
+    }
+
     @JvmStatic
     fun main(vararg args: String) {
-        val earliestId = if (args.isNotEmpty()) {
-            args[0].toLong()
+        val idRecord = sqliteClient.select("select max(max_id) earliest from transfer_id")
+        val earliestId = if (idRecord.isNotEmpty()) {
+            idRecord.first().getInt("earliest")
         } else {
-            500000L
+            0
         }
         val iterator = scrappyClient.selectIterator(
             "select * from scrapy_weibo_repost " +
                     "where id > ? and data like '{\"url\":%' " +
-                    "order by id asc",
+                    "order by id desc",
             earliestId
         )
         var maxId = 0L
 
         while (iterator.hasNext()) {
             val row = iterator.next()
-            maxId = row.byType("id")
+            maxId = Math.max(maxId, row.byType("id"))
 
             val data = row.getString("data").json2Map() as HashMap<String, Any?>
+            val rectified = hashMapOf<String, Any?>()
             if (data["url"] == null) {
                 continue
             }
+            rectified["url"] = data["url"]
             if (data["like"] != null) {
-                data["like"] = data.getString("like").firstMatch(numberRegex)
+                rectified["like"] = data.getString("like").firstMatch(numberRegex)
             }
             if (data["repost"] != null) {
-                data["repost"] = data.getString("repost").firstMatch(numberRegex)
+                rectified["repost"] = data.getString("repost").firstMatch(numberRegex)
             }
             if (data["comment"] != null) {
-                data["comment"] = data.getString("comment").firstMatch(numberRegex)
+                rectified["comment"] = data.getString("comment").firstMatch(numberRegex)
             }
             val mid = MicroBlog.url2codedMid(data["url"] as String)
-            data["mid"] = mid
+            rectified["mid"] = mid
+            val uid = MicroBlog.uidFromBlogUrl(data["url"] as String)
+            rectified["uid"] = uid
+            rectified["time"] = data["create_time"]
 
+            row["meta"] ?: continue
             val meta = row.getString("meta").json2Map()
             val source = meta.getHashMap("user_data").getString("keyword")
             if (source.contains("//weibo.com")) {
-                data["repost_link"] = source
+                rectified["repost_link"] = source
                 val repostId = MicroBlog.url2codedMid(source)
-                data["repost_id"] = repostId
+                rectified["repost_id"] = repostId
                 if (!repostTrees.containsKey(mid)) {
                     repostTrees[mid] = Blog(mid)
                     repostTrees[mid]!!.valid = true
                     roots.remove(repostTrees[mid]!!)
+                    sqliteClient.replace("blog", listOf(rectified))
                 }
                 if (!repostTrees.containsKey(repostId)) {
                     repostTrees[repostId] = Blog(repostId)
@@ -92,14 +121,14 @@ object FromScrappyDump {
                 repostTrees[repostId]!!.addChild(repostTrees[mid]!!)
             } else if (source.contains("//s.weibo.com")) {
                 println("found repost tree root: ${data["mid"]}")
-                data["repost_link"] = null
-                data["repost_id"] = null
+                rectified["repost_link"] = null
+                rectified["repost_id"] = null
+                sqliteClient.replace("blog", listOf(rectified))
             }
-
-            //sqliteClient.replace("blog", listOf(data))
         }
 
         println("max id: $maxId")
+        sqliteClient.insert("transfer_id", listOf(mapOf("max_id" to maxId)))
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")
         val diffusions = hashMapOf<String, List<Int>>()
