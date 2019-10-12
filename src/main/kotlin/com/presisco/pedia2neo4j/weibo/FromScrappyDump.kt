@@ -13,9 +13,9 @@ object FromScrappyDump {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "com.mysql.cj.jdbc.MysqlDataSource",
-                    "dataSource.url" to "jdbc:mysql://localhost:3306/dump?useUnicode=true&characterEncoding=UTF8",
-                    "dataSource.user" to "someone",
-                    "dataSource.password" to "nopassword",
+                    "dataSource.url" to "jdbc:mysql://10.144.15.187:3815/spider?useUnicode=true&characterEncoding=UTF8",
+                    "dataSource.user" to "spider",
+                    "dataSource.password" to "QAZwsxEDC",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
