@@ -12,17 +12,16 @@ object BlogTreeAnalyze {
         HikariDataSource(
             HikariConfig(
                 mapOf(
-                    "dataSourceClassName" to "com.mysql.cj.jdbc.MysqlDataSource",
-                    "dataSource.url" to "jdbc:mysql://10.144.48.95:3306/gossip?useUnicode=true&characterEncoding=UTF8",
-                    "dataSource.user" to "root",
-                    "dataSource.password" to "experimental",
+                    "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
+                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
         )
     )
 
-    fun main() {
+    @JvmStatic
+    fun main(vararg args: String) {
         val iterator = db.selectIterator("select mid, repost_id from blog")
         val repostTrees = hashMapOf<String, Blog>()
         val roots = hashSetOf<Blog>()
@@ -36,17 +35,32 @@ object BlogTreeAnalyze {
             }
 
             if (row["repost_id"] != null) {
-                roots.remove(repostTrees[mid]!!)
                 val repostId = row.getString("repost_id")
                 if (!repostTrees.containsKey(repostId)) {
                     repostTrees[repostId] = Blog(repostId)
+                    roots.add(repostTrees[repostId]!!)
+                } else {
+                    roots.remove(repostTrees[mid]!!)
                 }
-                roots.add(repostTrees[repostId]!!)
                 repostTrees[repostId]!!.addChild(repostTrees[mid]!!)
             } else {
                 roots.add(repostTrees[mid]!!)
             }
         }
+
+        println("unique blogs: ${repostTrees.keys.size}")
+        println("trees: ${roots.size}")
+        val diffusions = hashMapOf<String, List<Int>>()
+        roots.forEach {
+            diffusions[it.mid] = Blog.diffusionWidth(it)
+        }
+        println("max depth blog: ${diffusions.maxBy { it.value.size }}")
+
+        val depthStats = diffusions.values.map { it.size }.groupBy { it }.mapValues { it.value.size }
+        depthStats.forEach { depth, count -> println("depth: $depth has count: $count") }
+
+        val mostDepth = depthStats.maxBy { it.value }
+        println("most depth: $mostDepth")
     }
 
 }
