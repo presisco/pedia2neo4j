@@ -54,7 +54,10 @@ object BlogTreeAnalyze {
         roots.forEach {
             diffusions[it.mid] = Blog.diffusionWidth(it)
         }
-        println("max depth blog: ${diffusions.maxBy { it.value.size }}")
+
+        val depths = diffusions.mapValues { it.value.size }
+        val maxDepth = depths.maxBy { it.value }!!.value
+        println("max depth blogs: ${diffusions.filterValues { it.size == maxDepth }.keys}")
 
         val depthStats = diffusions.values.map { it.size }.groupBy { it }.mapValues { it.value.size }
         depthStats.forEach { depth, count -> println("depth: $depth has count: $count") }
