@@ -40,8 +40,11 @@ object MicroBlog {
     }
 
     fun url2codedMid(url: String): String {
-        val matchResult = blogUrlRegex.findAll(url).first()
-        val codedMid = matchResult.groupValues[2]
+        val matchResult = blogUrlRegex.findAll(url).iterator()
+        if (!matchResult.hasNext()) {
+            return ""
+        }
+        val codedMid = matchResult.next().groupValues[2]
         return codedMid
     }
 
@@ -53,8 +56,11 @@ object MicroBlog {
     }
 
     fun uidFromBlogUrl(url: String): String {
-        val matchResult = blogUrlRegex.findAll(url).first()
-        val uid = matchResult.groupValues[1]
+        val matchResult = blogUrlRegex.findAll(url).iterator()
+        if (!matchResult.hasNext()) {
+            return ""
+        }
+        val uid = matchResult.next().groupValues[1]
         return uid
     }
 

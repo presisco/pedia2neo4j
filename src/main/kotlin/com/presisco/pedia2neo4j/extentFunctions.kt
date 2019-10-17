@@ -135,6 +135,10 @@ fun String.firstMatch(regex: Regex): String? {
     return if (match == null) {
         null
     } else {
-        match.groupValues.first()
+        match.groupValues[1]
     }
+}
+
+fun String.extractValues(regex: Regex): List<String> {
+    return regex.findAll(this).map { it.groupValues[1] }.toList()
 }

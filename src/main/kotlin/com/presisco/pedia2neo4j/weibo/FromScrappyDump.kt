@@ -34,7 +34,9 @@ object FromScrappyDump {
         )
     )
 
-    val numberRegex = Regex("\\d+")
+    val numberRegex = Regex("\\D*?([0-9]+)")
+    val quoteUserRegex = Regex("(@\\S+)[:\\s]*")
+    val topicRegex = Regex("(#.+?#)")
 
     val repostTrees = hashMapOf<String, Blog>()
 
@@ -46,7 +48,7 @@ object FromScrappyDump {
                     "mid text(9) not null primary key, " +
                     "time text(16), " +
                     "content text, " +
-                    "uid text not null, " +
+                    "uid text(32) not null, " +
                     "like integer, " +
                     "comment integer, " +
                     "repost integer, " +
@@ -55,9 +57,29 @@ object FromScrappyDump {
                     "repost_link text)"
         )
         sqliteClient.executeSQL(
+            "create table if not exists user(" +
+                    "uid text(32) not null primary key, " +
+                    "name text(64))"
+        )
+        sqliteClient.executeSQL(
+            "create table if not exists tag(" +
+                    "mid text(9), " +
+                    "tag text)"
+        )
+        sqliteClient.executeSQL(
+            "create table if not exists root(" +
+                    "mid text(9) not null primary key, " +
+                    "keyword text not null)"
+        )
+        sqliteClient.executeSQL(
             "create table if not exists transfer_id(" +
                     "max_id integer primary key)"
         )
+    }
+
+    fun containsMid(mid: String): Boolean {
+        val result = sqliteClient.select("select mid from blog where mid = ?", mid)
+        return result.isNotEmpty()
     }
 
     @JvmStatic
@@ -95,11 +117,36 @@ object FromScrappyDump {
             if (data["comment"] != null) {
                 rectified["comment"] = data.getString("comment").firstMatch(numberRegex)
             }
+            if (data["content"] != null) {
+                rectified["content"] = data.getString("content")
+            }
             val mid = MicroBlog.url2codedMid(data["url"] as String)
             rectified["mid"] = mid
             val uid = MicroBlog.uidFromBlogUrl(data["url"] as String)
             rectified["uid"] = uid
+            val username = data["user"]
             rectified["time"] = data["create_time"]
+
+            if (!containsMid(mid) && rectified["content"] != null) {
+                val userQuotes = rectified.getString("content")
+                    .substringBefore("//@")
+                    .extractValues(quoteUserRegex)
+                val topics = rectified.getString("content")
+                    .substringBefore("//@")
+                    .extractValues(topicRegex)
+                sqliteClient.insert("tag", userQuotes.map {
+                    mapOf(
+                        "mid" to mid,
+                        "tag" to it
+                    )
+                })
+                sqliteClient.insert("tag", topics.map {
+                    mapOf(
+                        "mid" to mid,
+                        "tag" to it
+                    )
+                })
+            }
 
             row["meta"] ?: continue
             val meta = row.getString("meta").json2Map()
@@ -111,24 +158,57 @@ object FromScrappyDump {
                 if (!repostTrees.containsKey(mid)) {
                     repostTrees[mid] = Blog(mid)
                     repostTrees[mid]!!.valid = true
-                    roots.remove(repostTrees[mid]!!)
-                    sqliteClient.replace("blog", listOf(rectified))
+                    if (!containsMid(mid)) {
+                        sqliteClient.replace("blog", listOf(rectified))
+                        sqliteClient.replace(
+                            "user", listOf(
+                                mapOf(
+                                    "uid" to uid,
+                                    "name" to username
+                                )
+                            )
+                        )
+                    }
                 }
+
                 if (!repostTrees.containsKey(repostId)) {
                     repostTrees[repostId] = Blog(repostId)
                     roots.add(repostTrees[repostId]!!)
+                } else {
+                    roots.remove(repostTrees[mid]!!)
                 }
                 repostTrees[repostId]!!.addChild(repostTrees[mid]!!)
-            } else if (source.contains("//s.weibo.com")) {
+            } else {
                 println("found repost tree root: ${data["mid"]}")
                 rectified["repost_link"] = null
                 rectified["repost_id"] = null
-                sqliteClient.replace("blog", listOf(rectified))
+                if (!repostTrees.containsKey(mid)) {
+                    repostTrees[mid] = Blog(mid)
+                    repostTrees[mid]!!.valid = true
+                }
+                if (!repostTrees[mid]!!.valid) {
+                    repostTrees[mid]!!.valid = true
+                }
+                if (!containsMid(mid)) {
+                    sqliteClient.replace("blog", listOf(rectified))
+                    sqliteClient.replace(
+                        "root", listOf(
+                            mapOf(
+                                "mid" to mid,
+                                "keyword" to source
+                            )
+                        )
+                    )
+                }
+
+                roots.add(repostTrees[mid]!!)
             }
         }
 
         println("max id: $maxId")
-        sqliteClient.insert("transfer_id", listOf(mapOf("max_id" to maxId)))
+        if (maxId != 0L) {
+            sqliteClient.insert("transfer_id", listOf(mapOf("max_id" to maxId)))
+        }
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")
         val diffusions = hashMapOf<String, List<Int>>()
