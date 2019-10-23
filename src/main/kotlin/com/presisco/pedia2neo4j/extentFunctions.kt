@@ -5,6 +5,8 @@ import org.neo4j.driver.v1.Session
 import org.neo4j.driver.v1.Values
 import org.neo4j.driver.v1.Values.parameters
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.*
 
 fun String.json2Map() = MapHelper().fromJson(this)
@@ -142,3 +144,7 @@ fun String.firstMatch(regex: Regex): String? {
 fun String.extractValues(regex: Regex): List<String> {
     return regex.findAll(this).map { it.groupValues[1] }.toList()
 }
+
+val dateTimeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")!!
+
+fun LocalDateTime.toFormatString() = this.format(dateTimeFormat)
