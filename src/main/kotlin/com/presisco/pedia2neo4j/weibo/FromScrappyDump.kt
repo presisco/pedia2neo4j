@@ -14,9 +14,9 @@ object FromScrappyDump {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "com.mysql.cj.jdbc.MysqlDataSource",
-                    "dataSource.url" to "jdbc:mysql://10.144.15.187:3815/spider?useUnicode=true&characterEncoding=UTF8",
-                    "dataSource.user" to "spider",
-                    "dataSource.password" to "QAZwsxEDC",
+                    "dataSource.url" to "jdbc:mysql://localhost:3306/scrappy?useUnicode=true&characterEncoding=UTF8&useCursorFetch=true",
+                    "dataSource.user" to "root",
+                    "dataSource.password" to "experimental",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -304,6 +304,7 @@ object FromScrappyDump {
             0
         }
         val iterator = scrappyClient.selectIterator(
+            Int.MIN_VALUE,
             "select * from scrapy_weibo_repost " +
                     "order by id asc"
         )
