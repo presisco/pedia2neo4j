@@ -4,6 +4,10 @@ data class Blog(
     val mid: String,
     val childs: MutableSet<Blog> = hashSetOf(),
     var maxDepth: Int = 0,
+    var like: Int = 0,
+    var comment: Int = 0,
+    var repost: Int = 0,
+    var scrapTime: String = "0000-00-00 00:00:00",
     var valid: Boolean = false
 ) {
     override fun hashCode(): Int {

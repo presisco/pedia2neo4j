@@ -41,6 +41,8 @@ object FromScrappyDump {
 
     val repostTrees = hashMapOf<String, Blog>()
 
+    val commentLikes = hashMapOf<String, Int>()
+
     val roots = hashSetOf<Blog>()
 
     init {
@@ -130,6 +132,19 @@ object FromScrappyDump {
             .execute()
     }
 
+    fun Map<String, *>.intOrZero(key: String): Int {
+        return if (this[key] != null) {
+            val number = this.getString(key).firstMatch(numberRegex)
+            if (number == null) {
+                0
+            } else {
+                number.toInt()
+            }
+        } else {
+            0
+        }
+    }
+
     fun parseBlog(scrapTime: String, data: Map<String, *>, meta: Map<String, *>): Boolean {
         val rectified = hashMapOf<String, Any?>()
         if (data["url"] == null) {
@@ -137,15 +152,9 @@ object FromScrappyDump {
             return false
         }
         rectified["url"] = data["url"]
-        if (data["like"] != null) {
-            rectified["like"] = data.getString("like").firstMatch(numberRegex)
-        }
-        if (data["repost"] != null) {
-            rectified["repost"] = data.getString("repost").firstMatch(numberRegex)
-        }
-        if (data["comment"] != null) {
-            rectified["comment"] = data.getString("comment").firstMatch(numberRegex)
-        }
+        rectified["repost"] = data.intOrZero("repost")
+        rectified["comment"] = data.intOrZero("comment")
+        rectified["like"] = data.intOrZero("like")
         if (data["content"] != null) {
             rectified["content"] = data.getString("content")
         }
@@ -163,6 +172,11 @@ object FromScrappyDump {
         val username = data["user"]
         if (data.containsKey("create_time")) {
             rectified["time"] = data["create_time"]
+        } else {
+            rectified["time"] = data.getString("time")
+                .substringAfter("\">")
+                .substringBefore("</a>")
+                .trim()
         }
         if (data["create_time"] == null) {
             println("unknown time!")
@@ -195,14 +209,31 @@ object FromScrappyDump {
             rectified["repost_link"] = source
             val repostId = MicroBlog.url2codedMid(source)
             rectified["repost_id"] = repostId
-            if (!repostTrees.containsKey(mid)) {
-                repostTrees[mid] = Blog(mid)
+            val firstRecord = if (!repostTrees.containsKey(mid)) {
+                repostTrees[mid] = Blog(
+                    mid,
+                    comment = rectified["comment"] as Int,
+                    like = rectified["like"] as Int,
+                    repost = rectified["repost"] as Int
+                )
                 repostTrees[mid]!!.valid = true
+                true
+            } else {
+                false
             }
+            val blog = repostTrees[mid]!!
             val lastScrapTime = containsMid(mid)
             if (lastScrapTime == null) {
                 sqliteClient.insert("blog", listOf(rectified))
-            } else if (lastScrapTime < scrapTime) {
+            } else if ((firstRecord
+                        && lastScrapTime < scrapTime)
+                || (blog.comment < rectified["comment"] as Int
+                        || blog.like < rectified["like"] as Int
+                        || blog.repost < rectified["repost"] as Int)
+            ) {
+                blog.comment = rectified["comment"] as Int
+                blog.like = rectified["like"] as Int
+                blog.repost = rectified["repost"] as Int
                 updateBlog(rectified)
             }
             if (!containsUid(uid)) {
@@ -254,7 +285,7 @@ object FromScrappyDump {
 
     fun <T> Map<String, *>.maybeFirstOfList(key: String): T {
         return if (this[key] is List<*>) {
-            this.getList<T>("comment_id")[0]
+            this.getList<T>(key)[0]
         } else {
             this[key] as T
         }
@@ -266,7 +297,8 @@ object FromScrappyDump {
             return false
         }
         val rectified = hashMapOf<String, Any?>()
-        rectified["cid"] = MicroBlog.encodeMid(data.maybeFirstOfList("comment_id"))
+        val cid = MicroBlog.encodeMid(data.maybeFirstOfList("comment_id"))
+        rectified["cid"] = cid
 
         if (data["create_time"] == null) {
             rectified["time"] = null
@@ -285,31 +317,49 @@ object FromScrappyDump {
 
         rectified["uid"] = MicroBlog.uidFromUserUrl(data.maybeFirstOfList("user_link"))
         rectified["mid"] = MicroBlog.url2codedMid(meta.getHashMap("user_data").getString("keyword"))
-        rectified["like"] = data.maybeFirstOfList<String>("like").firstMatch(numberRegex)
-        val lastScrapTime = containsCid(rectified.getString("cid"))
-        if (lastScrapTime == null) {
-            sqliteClient.insert("comment", listOf(rectified))
-        } else if (scrapTime > lastScrapTime) {
-            updateComment(rectified)
+        val likeText = if (data["like"] != null) {
+            data.maybeFirstOfList<String>("like").firstMatch(numberRegex)
+        } else {
+            null
         }
+        rectified["like"] = if (likeText != null && likeText != "") {
+            likeText.toInt()
+        } else {
+            0
+        }
+        if (!commentLikes.containsKey(cid)) {
+            commentLikes[cid] = rectified["like"] as Int
+            val lastScrapTime = containsCid(rectified.getString("cid"))
+            if (lastScrapTime == null) {
+                sqliteClient.insert("comment", listOf(rectified))
+            } else if (scrapTime > lastScrapTime) {
+                updateComment(rectified)
+            }
+        } else if (commentLikes[cid]!! < rectified["like"] as Int) {
+            updateComment(rectified)
+            commentLikes[cid] = rectified["like"] as Int
+        }
+
         return true
     }
 
     @JvmStatic
     fun main(vararg args: String) {
         val idRecord = sqliteClient.select("select max(max_id) earliest from transfer_id")
-        val earliestId = if (idRecord.isNotEmpty()) {
+        var earliestId = if (idRecord.isNotEmpty()) {
             idRecord.first().getInt("earliest")
         } else {
-            0
+            -1
         }
+
+        earliestId = 1449465
         val iterator = scrappyClient.selectIterator(
             Int.MIN_VALUE,
             "select * from scrapy_weibo_repost " +
+                    "where id > $earliestId " +
                     "order by id asc"
         )
         var maxId = 0L
-
         while (iterator.hasNext()) {
             val row = iterator.next()
             maxId = row.byType("id")
@@ -322,22 +372,22 @@ object FromScrappyDump {
             val data = row.getString("data").json2Map() as HashMap<String, Any?>
             val meta = row.getString("meta").json2Map()
 
-            val result =
-                try {
-                    when (row.getString("version")) {
-                        "repost" -> parseBlog(scrapTime, data, meta)
-                        "comment1" -> parseComment(scrapTime, data, meta)
-                        else -> {
-                            println("unexpected version: ${row.getString("version")}")
-                            false
-                        }
+
+            try {
+                val result = when (row.getString("version")) {
+                    "repost", "search1" -> parseBlog(scrapTime, data, meta)
+                    "comment1" -> parseComment(scrapTime, data, meta)
+                    else -> {
+                        println("unexpected version: ${row.getString("version")}")
+                        false
                     }
-                } catch (e: Exception) {
-                    println(e.message)
-                    false
                 }
-            if (!result) {
-                println("parse failed for id: ${row["id"]}")
+                if (!result) {
+                    println("parse failed for id: ${row["id"]}")
+                }
+            } catch (e: Exception) {
+                println("exception at id: ${row["id"]}")
+                throw e
             }
         }
 
