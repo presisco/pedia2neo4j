@@ -4,8 +4,6 @@ import com.presisco.lazyjdbc.client.MapJdbcClient
 import com.presisco.pedia2neo4j.*
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import java.time.LocalDateTime
-import java.util.*
 
 object FromScrappyDump {
 
@@ -13,10 +11,8 @@ object FromScrappyDump {
         HikariDataSource(
             HikariConfig(
                 mapOf(
-                    "dataSourceClassName" to "com.mysql.cj.jdbc.MysqlDataSource",
-                    "dataSource.url" to "jdbc:mysql://localhost:3306/scrappy?useUnicode=true&characterEncoding=UTF8&useCursorFetch=true",
-                    "dataSource.user" to "root",
-                    "dataSource.password" to "experimental",
+                    "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
+                    "dataSource.url" to "jdbc:sqlite:D:/scrappy_dump.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -35,13 +31,12 @@ object FromScrappyDump {
         )
     )
 
-    val numberRegex = Regex("\\D*?([0-9]+)")
+    val numberRegex = Regex(".*?([0-9]+)")
+    val numberFromXml = Regex(">([0-9]+)<")
     val quoteUserRegex = Regex("(@\\S+)[:\\s]*")
     val topicRegex = Regex("(#.+?#)")
 
     val repostTrees = hashMapOf<String, Blog>()
-
-    val commentLikes = hashMapOf<String, Int>()
 
     val roots = hashSetOf<Blog>()
 
@@ -105,33 +100,6 @@ object FromScrappyDump {
         return result.isNotEmpty()
     }
 
-    fun containsCid(cid: String): String? {
-        val result = sqliteClient.select("select scrap_time from comment where cid = ?", cid)
-        if (result.isEmpty()) {
-            return null
-        } else {
-            return result.first()["scrap_time"] as String
-        }
-    }
-
-    fun updateBlog(blog: Map<String, *>) {
-        sqliteClient.update("blog")
-            .set(
-                "like" to blog["like"],
-                "repost" to blog["repost"],
-                "comment" to blog["comment"]
-            )
-            .where("mid", "=", blog["mid"])
-            .execute()
-    }
-
-    fun updateComment(comment: Map<String, *>) {
-        sqliteClient.update("comment")
-            .set("like" to comment.getInt("like"))
-            .where("cid", "=", comment.getString("cid"))
-            .execute()
-    }
-
     fun Map<String, *>.intOrZero(key: String): Int {
         return if (this[key] != null) {
             val number = this.getString(key).firstMatch(numberRegex)
@@ -183,25 +151,25 @@ object FromScrappyDump {
         }
         rectified["scrap_time"] = scrapTime
 
-        if (containsMid(mid) == null && rectified["content"] != null) {
+        val lastScrapTime = containsMid(mid)
+        if (lastScrapTime == null && rectified["content"] != null) {
             val userQuotes = rectified.getString("content")
                 .substringBefore("//@")
                 .extractValues(quoteUserRegex)
             val topics = rectified.getString("content")
                 .substringBefore("//@")
                 .extractValues(topicRegex)
-            sqliteClient.insert("tag", userQuotes.map {
-                mapOf(
-                    "mid" to mid,
-                    "tag" to it
+            WeiboManager.setList("tag", mid, userQuotes)
+            WeiboManager.setList("tag", mid, topics)
+        }
+
+        if (!containsUid(uid)) {
+            WeiboManager.setInfo(
+                "user", uid, mapOf(
+                    "uid" to uid,
+                    "name" to username
                 )
-            })
-            sqliteClient.insert("tag", topics.map {
-                mapOf(
-                    "mid" to mid,
-                    "tag" to it
-                )
-            })
+            )
         }
 
         val source = meta.getHashMap("user_data").getString("keyword")
@@ -209,44 +177,10 @@ object FromScrappyDump {
             rectified["repost_link"] = source
             val repostId = MicroBlog.url2codedMid(source)
             rectified["repost_id"] = repostId
-            val firstRecord = if (!repostTrees.containsKey(mid)) {
-                repostTrees[mid] = Blog(
-                    mid,
-                    comment = rectified["comment"] as Int,
-                    like = rectified["like"] as Int,
-                    repost = rectified["repost"] as Int
-                )
+            if (!repostTrees.containsKey(mid)) {
+                repostTrees[mid] = Blog(mid)
                 repostTrees[mid]!!.valid = true
-                true
-            } else {
-                false
             }
-            val blog = repostTrees[mid]!!
-            val lastScrapTime = containsMid(mid)
-            if (lastScrapTime == null) {
-                sqliteClient.insert("blog", listOf(rectified))
-            } else if ((firstRecord
-                        && lastScrapTime < scrapTime)
-                || (blog.comment < rectified["comment"] as Int
-                        || blog.like < rectified["like"] as Int
-                        || blog.repost < rectified["repost"] as Int)
-            ) {
-                blog.comment = rectified["comment"] as Int
-                blog.like = rectified["like"] as Int
-                blog.repost = rectified["repost"] as Int
-                updateBlog(rectified)
-            }
-            if (!containsUid(uid)) {
-                sqliteClient.insert(
-                    "user", listOf(
-                        mapOf(
-                            "uid" to uid,
-                            "name" to username
-                        )
-                    )
-                )
-            }
-
             if (!repostTrees.containsKey(repostId)) {
                 repostTrees[repostId] = Blog(repostId)
                 roots.add(repostTrees[repostId]!!)
@@ -259,27 +193,19 @@ object FromScrappyDump {
             rectified["repost_id"] = null
             if (!repostTrees.containsKey(mid)) {
                 repostTrees[mid] = Blog(mid)
-                repostTrees[mid]!!.valid = true
             }
-            if (!repostTrees[mid]!!.valid) {
-                repostTrees[mid]!!.valid = true
-            }
-            val lastScrapTime = containsMid(mid)
+            repostTrees[mid]!!.valid = true
             if (lastScrapTime == null) {
-                sqliteClient.insert("blog", listOf(rectified))
-                sqliteClient.insert(
-                    "root", listOf(
-                        mapOf(
-                            "mid" to mid,
-                            "keyword" to source
-                        )
+                WeiboManager.setInfo(
+                    "root", mid, mapOf(
+                        "mid" to mid,
+                        "keyword" to source
                     )
                 )
-            } else if (scrapTime > lastScrapTime) {
-                updateBlog(rectified)
             }
             roots.add(repostTrees[mid]!!)
         }
+        WeiboManager.setInfo("blog", mid, rectified)
         return true
     }
 
@@ -315,7 +241,8 @@ object FromScrappyDump {
         rectified["scrap_time"] = scrapTime
         rectified["content"] = data["content"]
 
-        rectified["uid"] = MicroBlog.uidFromUserUrl(data.maybeFirstOfList("user_link"))
+        val uid = MicroBlog.uidFromUserUrl(data.maybeFirstOfList("user_link"))
+        rectified["uid"] = uid
         rectified["mid"] = MicroBlog.url2codedMid(meta.getHashMap("user_data").getString("keyword"))
         val likeText = if (data["like"] != null) {
             data.maybeFirstOfList<String>("like").firstMatch(numberRegex)
@@ -327,18 +254,7 @@ object FromScrappyDump {
         } else {
             0
         }
-        if (!commentLikes.containsKey(cid)) {
-            commentLikes[cid] = rectified["like"] as Int
-            val lastScrapTime = containsCid(rectified.getString("cid"))
-            if (lastScrapTime == null) {
-                sqliteClient.insert("comment", listOf(rectified))
-            } else if (scrapTime > lastScrapTime) {
-                updateComment(rectified)
-            }
-        } else if (commentLikes[cid]!! < rectified["like"] as Int) {
-            updateComment(rectified)
-            commentLikes[cid] = rectified["like"] as Int
-        }
+        WeiboManager.setInfo("comment", cid, rectified)
 
         return true
     }
@@ -351,16 +267,16 @@ object FromScrappyDump {
         } else {
             -1
         }
-
-        earliestId = 1449465
+        println("starting at id: ${earliestId + 1}")
         val iterator = scrappyClient.selectIterator(
-            Int.MIN_VALUE,
-            "select * from scrapy_weibo_repost " +
-                    "where id > $earliestId " +
-                    "order by id asc"
+            1000,
+            "select * from data " +
+                    "where id > $earliestId"
         )
+        var counter = 0
         var maxId = 0L
         while (iterator.hasNext()) {
+            counter++
             val row = iterator.next()
             maxId = row.byType("id")
             if (row["data"] == null || row["meta"] == null) {
@@ -368,7 +284,7 @@ object FromScrappyDump {
                 continue
             }
 
-            val scrapTime = row.byType<LocalDateTime>("createtime").toFormatString()
+            val scrapTime = row.getString("createtime")
             val data = row.getString("data").json2Map() as HashMap<String, Any?>
             val meta = row.getString("meta").json2Map()
 
@@ -389,12 +305,28 @@ object FromScrappyDump {
                 println("exception at id: ${row["id"]}")
                 throw e
             }
+
+            if (counter % 500000 == 0) {
+                sqliteClient.replace("blog", WeiboManager.getInfoValues("blog").toList())
+
+                sqliteClient.replace("comment", WeiboManager.getInfoValues("comment").toList())
+
+                sqliteClient.replace("user", WeiboManager.getInfoValues("user").toList())
+
+                sqliteClient.replace("tag", WeiboManager.getFlattenList("tag", "mid", "tag"))
+
+                sqliteClient.replace("root", WeiboManager.getInfoValues("root").toList())
+
+                WeiboManager.reset()
+            }
         }
 
-        println("max id: $maxId")
+        println("max id: $maxId, read $counter records!")
+
         if (maxId != 0L) {
             sqliteClient.insert("transfer_id", listOf(mapOf("max_id" to maxId)))
         }
+
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")
         val diffusions = hashMapOf<String, List<Int>>()

@@ -3,11 +3,7 @@ package com.presisco.pedia2neo4j.weibo
 data class Blog(
     val mid: String,
     val childs: MutableSet<Blog> = hashSetOf(),
-    var maxDepth: Int = 0,
-    var like: Int = 0,
-    var comment: Int = 0,
-    var repost: Int = 0,
-    var scrapTime: String = "0000-00-00 00:00:00",
+    var childDepth: Int = 0,
     var valid: Boolean = false
 ) {
     override fun hashCode(): Int {
@@ -24,6 +20,31 @@ data class Blog(
             stages[depth]++
             blog.childs.forEach { diffusionWidth(it, depth + 1, stages) }
             return stages
+        }
+
+        fun maxChildDepth(blog: Blog, level: Int = 0): Int {
+            if (blog.childs.isEmpty()) {
+                return level
+            }
+            var maxDepth = -1
+            blog.childs.forEach {
+                val childDepth = maxChildDepth(it, level + 1)
+                if (childDepth > maxDepth) {
+                    maxDepth = childDepth
+                }
+            }
+            blog.childDepth = maxDepth
+            return maxDepth
+        }
+
+        fun deepestPath(blog: Blog, path: MutableList<String> = arrayListOf()): List<String> {
+            path.add(blog.mid)
+            if (blog.childs.isEmpty()) {
+                return path
+            }
+            val deepestChild = blog.childs.maxBy { it.childDepth }!!
+            deepestPath(deepestChild, path)
+            return path
         }
     }
 }
