@@ -3,6 +3,8 @@ package com.presisco.pedia2neo4j.weibo
 data class Blog(
     val mid: String,
     val childs: MutableSet<Blog> = hashSetOf(),
+    var uid: String = "",
+    var time: String = "",
     var maxDepth: Int = 0,
     var like: Int = 0,
     var comment: Int = 0,

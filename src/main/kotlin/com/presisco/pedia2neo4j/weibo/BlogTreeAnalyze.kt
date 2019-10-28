@@ -20,6 +20,11 @@ object BlogTreeAnalyze {
         )
     )
 
+    fun setRootPointer(rootMid: String, blog: Blog, updateList: MutableList<Map<String, String>>) {
+        updateList.addAll(blog.childs.map { mapOf("mid" to it.mid, "root_id" to rootMid) })
+        blog.childs.forEach { setRootPointer(rootMid, it, updateList) }
+    }
+
     @JvmStatic
     fun main(vararg args: String) {
         val iterator = db.selectIterator("select mid, repost_id from blog")
@@ -51,11 +56,12 @@ object BlogTreeAnalyze {
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")
 
-        val updateList = arrayListOf<Map<String, *>>()
+        val rootUpdateList = arrayListOf<Map<String, *>>()
+        val blogUpdateList = arrayListOf<Map<String, String>>()
         for (blog in roots.keys) {
-            //roots[blog] = Blog.diffusionWidth(blog).size
             roots[blog] = Blog.maxDepth(blog)
-            updateList.add(
+            setRootPointer(blog.mid, blog, blogUpdateList)
+            rootUpdateList.add(
                 mapOf(
                     "mid" to blog.mid,
                     "depth" to roots[blog]
@@ -64,8 +70,15 @@ object BlogTreeAnalyze {
         }
         db.executeBatch(
             { "update root set depth = ? where mid = ?" },
-            updateList,
-            db.buildTypeMapSubset("root", updateList)
+            rootUpdateList,
+            db.buildTypeMapSubset("root", rootUpdateList),
+            listOf("depth", "mid")
+        )
+        db.executeBatch(
+            { "update blog set root_id = ? where mid = ?" },
+            blogUpdateList,
+            db.buildTypeMapSubset("blog", blogUpdateList),
+            listOf("root_id", "mid")
         )
 
         roots.values.groupBy { it }.forEach { depth, counts ->
