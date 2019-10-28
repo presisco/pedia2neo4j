@@ -13,7 +13,7 @@ object BlogTreeAnalyze {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
+                    "dataSource.url" to "jdbc:sqlite:E:/database/scrappy_weibo.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -50,20 +50,19 @@ object BlogTreeAnalyze {
 
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")
-        val diffusions = hashMapOf<String, List<Int>>()
-        roots.forEach {
-            diffusions[it.mid] = Blog.diffusionWidth(it)
+
+        val rootDepths = roots.groupBy { Blog.diffusionWidth(it).size }
+        rootDepths.forEach { depth, roots ->
+            println(
+                "depth: $depth ${
+                if (roots.size < 11) {
+                    roots.map { it.mid }.toString()
+                } else {
+                    roots.size
+                }
+                }"
+            )
         }
-
-        val depths = diffusions.mapValues { it.value.size }
-        val maxDepth = depths.maxBy { it.value }!!.value
-        println("max depth blogs: ${diffusions.filterValues { it.size == maxDepth }.keys}")
-
-        val depthStats = diffusions.values.map { it.size }.groupBy { it }.mapValues { it.value.size }
-        depthStats.forEach { depth, count -> println("depth: $depth has count: $count") }
-
-        val mostDepth = depthStats.maxBy { it.value }
-        println("most depth: $mostDepth")
     }
 
 }
