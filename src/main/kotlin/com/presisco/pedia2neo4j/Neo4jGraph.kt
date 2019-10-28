@@ -6,7 +6,7 @@ import org.neo4j.driver.v1.GraphDatabase
 import org.neo4j.driver.v1.Values
 import org.slf4j.LoggerFactory
 
-abstract class Neo4jGraph {
+open class Neo4jGraph {
     private val logger = LoggerFactory.getLogger(Neo4jGraph::class.java)
 
     val neo4jConf = mapOf(
@@ -39,6 +39,39 @@ abstract class Neo4jGraph {
         }
     }
 
+    fun createRelationFromIdToNodes(
+        fromId: Int,
+        toIds: List<Int>,
+        relation: String
+    ) {
+        session.writeTransaction {
+            it.run(
+                "match (from), (to)" +
+                        " where id(from) = $fromId and id(to) in [${toIds.joinToString(separator = ",")}]" +
+                        " merge (from) - [rel:`$relation`] -> (to)"
+            )
+        }
+    }
+
+    fun createNodes(
+        names: List<String>,
+        labels: Set<String>
+    ): List<Int> {
+        val ids = arrayListOf<Int>()
+        session.writeTransaction { trans ->
+            names.forEach {
+                ids.add(
+                    trans.run(
+                        "create (new${labels.toLabels()}{name: \$name}) RETURN id(new) ",
+                        Values.parameters("name", it)
+                    )
+                        .single().get(0).asInt()
+                )
+            }
+        }
+        return ids
+    }
+
     fun mergeEntityWithCache(name: String, labels: Set<String>): Int {
         var id = Neo4jIdCache.idFor(name, labels)
         if (id == -1) {
@@ -47,7 +80,6 @@ abstract class Neo4jGraph {
         }
         return id
     }
-
 
     fun clearGraph() {
         logger.info("deleting graph")

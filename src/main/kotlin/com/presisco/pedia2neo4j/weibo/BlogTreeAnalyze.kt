@@ -13,7 +13,7 @@ object BlogTreeAnalyze {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:E:/database/scrappy_weibo.db",
+                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -24,7 +24,7 @@ object BlogTreeAnalyze {
     fun main(vararg args: String) {
         val iterator = db.selectIterator("select mid, repost_id from blog")
         val repostTrees = hashMapOf<String, Blog>()
-        val roots = hashSetOf<Blog>()
+        val roots = hashMapOf<Blog, Int>()
         while (iterator.hasNext()) {
             val row = iterator.next()
 
@@ -38,30 +38,38 @@ object BlogTreeAnalyze {
                 val repostId = row.getString("repost_id")
                 if (!repostTrees.containsKey(repostId)) {
                     repostTrees[repostId] = Blog(repostId)
-                    roots.add(repostTrees[repostId]!!)
+                    roots[repostTrees[repostId]!!] = 0
                 } else {
                     roots.remove(repostTrees[mid]!!)
                 }
                 repostTrees[repostId]!!.addChild(repostTrees[mid]!!)
             } else {
-                roots.add(repostTrees[mid]!!)
+                roots[repostTrees[mid]!!] = 0
             }
         }
 
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")
 
-        val rootDepths = roots.groupBy { Blog.diffusionWidth(it).size }
-        rootDepths.forEach { depth, roots ->
-            println(
-                "depth: $depth ${
-                if (roots.size < 11) {
-                    roots.map { it.mid }.toString()
-                } else {
-                    roots.size
-                }
-                }"
+        val updateList = arrayListOf<Map<String, *>>()
+        for (blog in roots.keys) {
+            //roots[blog] = Blog.diffusionWidth(blog).size
+            roots[blog] = Blog.maxDepth(blog)
+            updateList.add(
+                mapOf(
+                    "mid" to blog.mid,
+                    "depth" to roots[blog]
+                )
             )
+        }
+        db.executeBatch(
+            { "update root set depth = ? where mid = ?" },
+            updateList,
+            db.buildTypeMapSubset("root", updateList)
+        )
+
+        roots.values.groupBy { it }.forEach { depth, counts ->
+            println("depth: $depth has ${counts.size} trees")
         }
     }
 

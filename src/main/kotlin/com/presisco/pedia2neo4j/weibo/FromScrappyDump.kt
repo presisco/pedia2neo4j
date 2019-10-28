@@ -73,7 +73,8 @@ object FromScrappyDump {
         sqliteClient.executeSQL(
             "create table if not exists root(" +
                     "mid text(9) not null primary key, " +
-                    "keyword text not null)"
+                    "keyword text not null, " +
+                    "depth integer)"
         )
         sqliteClient.executeSQL(
             "create table if not exists comment(" +

@@ -25,5 +25,16 @@ data class Blog(
             blog.childs.forEach { diffusionWidth(it, depth + 1, stages) }
             return stages
         }
+
+        fun maxDepth(blog: Blog, level: Int = 0): Int {
+            if (blog.childs.isEmpty()) {
+                blog.maxDepth = level
+                return level
+            }
+            blog.childs.forEach { maxDepth(it, level + 1) }
+            val deepest = blog.childs.maxBy { it.maxDepth }
+            blog.maxDepth = deepest!!.maxDepth
+            return blog.maxDepth
+        }
     }
 }
