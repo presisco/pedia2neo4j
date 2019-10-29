@@ -58,7 +58,8 @@ object FromScrappyDump {
                     "repost integer, " +
                     "url text not null, " +
                     "repost_id text(9), " +
-                    "repost_link text)"
+                    "repost_link text, " +
+                    "root_id text(9))"
         )
         sqliteClient.executeSQL(
             "create table if not exists user(" +
