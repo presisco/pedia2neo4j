@@ -102,6 +102,13 @@ fun Map<String, *>.addFieldToNewMap(pair: Pair<String, Any?>): HashMap<String, A
     return newMap
 }
 
+fun <K, V> MutableMap<K, MutableList<V>>.addToValue(key: K, value: V) {
+    if (!this.containsKey(key)) {
+        this[key] = arrayListOf()
+    }
+    this[key]!!.add(value)
+}
+
 inline fun <R, T> List<T>.mapToArrayList(mapFunc: (original: T) -> R): ArrayList<R> {
     val arrayList = ArrayList<R>(this.size)
     this.mapTo(arrayList, mapFunc)
