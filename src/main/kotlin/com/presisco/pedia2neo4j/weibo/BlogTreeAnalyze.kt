@@ -5,6 +5,7 @@ import com.presisco.pedia2neo4j.getString
 import com.presisco.pedia2neo4j.toProperties
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import java.util.*
 
 object BlogTreeAnalyze {
 
@@ -28,32 +29,32 @@ object BlogTreeAnalyze {
     @JvmStatic
     fun main(vararg args: String) {
         val iterator = db.selectIterator("select mid, repost_id from blog")
-        val repostTrees = hashMapOf<String, Blog>()
+        val blogs = hashMapOf<String, Blog>()
         val roots = hashMapOf<Blog, Int>()
         while (iterator.hasNext()) {
             val row = iterator.next()
 
             val mid = row.getString("mid")
-            if (!repostTrees.containsKey(mid)) {
-                repostTrees[mid] = Blog(mid)
-                repostTrees[mid]!!.valid = true
+            if (!blogs.containsKey(mid)) {
+                blogs[mid] = Blog(mid)
+                blogs[mid]!!.valid = true
             }
 
             if (row["repost_id"] != null) {
                 val repostId = row.getString("repost_id")
-                if (!repostTrees.containsKey(repostId)) {
-                    repostTrees[repostId] = Blog(repostId)
-                    roots[repostTrees[repostId]!!] = 0
+                if (!blogs.containsKey(repostId)) {
+                    blogs[repostId] = Blog(repostId)
+                    roots[blogs[repostId]!!] = 0
                 } else {
-                    roots.remove(repostTrees[mid]!!)
+                    roots.remove(blogs[mid]!!)
                 }
-                repostTrees[repostId]!!.addChild(repostTrees[mid]!!)
+                blogs[repostId]!!.addChild(blogs[mid]!!)
             } else {
-                roots[repostTrees[mid]!!] = 0
+                roots[blogs[mid]!!] = 0
             }
         }
 
-        println("unique blogs: ${repostTrees.keys.size}")
+        println("unique blogs: ${blogs.keys.size}")
         println("trees: ${roots.size}")
 
         val rootUpdateList = arrayListOf<Map<String, *>>()
@@ -81,8 +82,24 @@ object BlogTreeAnalyze {
             listOf("root_id", "mid")
         )
 
-        roots.values.groupBy { it }.forEach { depth, counts ->
-            println("depth: $depth has ${counts.size} trees")
+        val depthMap = roots.entries.groupBy { it.value }.toSortedMap()
+
+        depthMap.forEach { (depth, mids) ->
+            println("depth: $depth has ${mids.size} trees")
+        }
+
+        val keyboard = Scanner(System.`in`)
+        while (true) {
+            val input = keyboard.nextLine()
+            if (input == "quit") {
+                break;
+            }
+            val commands = input.split(" ")
+            when (commands[0]) {
+                "stages" -> println(Blog.diffusionWidth(blogs[commands[1]]!!).toString())
+                "blogs_of_depth" -> println(depthMap[commands[1].toInt()]!!.toString())
+                else -> println("unknown command!")
+            }
         }
     }
 
