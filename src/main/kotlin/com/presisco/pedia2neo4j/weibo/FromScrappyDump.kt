@@ -40,6 +40,8 @@ object FromScrappyDump {
 
     val roots = hashSetOf<Blog>()
 
+    val tags = hashMapOf<String, Int>()
+
     init {
         sqliteClient.executeSQL(
             "create table if not exists blog(" +
@@ -63,8 +65,13 @@ object FromScrappyDump {
         )
         sqliteClient.executeSQL(
             "create table if not exists tag(" +
-                    "mid text(9), " +
+                    "tid integer primary key, " +
                     "tag text)"
+        )
+        sqliteClient.executeSQL(
+            "create table if not exists blog_with_tag(" +
+                    "mid text(9) not null, " +
+                    "tid integer not null)"
         )
         sqliteClient.executeSQL(
             "create table if not exists root(" +
@@ -86,6 +93,11 @@ object FromScrappyDump {
             "create table if not exists transfer_id(" +
                     "max_id integer primary key)"
         )
+        val tagIter = sqliteClient.selectIterator("select * from tag")
+        while (tagIter.hasNext()) {
+            val row = tagIter.next()
+            tags[row.getString("tag")] = row.getInt("tid")
+        }
     }
 
     fun containsMid(mid: String): String? {
@@ -113,6 +125,31 @@ object FromScrappyDump {
         } else {
             0
         }
+    }
+
+    fun detectTags(content: String): List<Int> {
+        val topContent = content.substringBefore("//@")
+        val tagContent = arrayListOf<String>()
+        tagContent.addAll(topContent.extractValues(quoteUserRegex))
+        tagContent.addAll(topContent.extractValues(topicRegex))
+        return tagContent.map { tag ->
+            if (!tags.containsKey(tag))
+                tags[tag] = tags.size
+            tags[tag]!!
+        }
+    }
+
+    fun saveTags() {
+        val insertList = arrayListOf<Map<String, Any>>()
+        tags.forEach { (tag, tid) ->
+            insertList.add(
+                mapOf(
+                    "tid" to tid,
+                    "tag" to tag
+                )
+            )
+        }
+        sqliteClient.replace("tag", insertList)
     }
 
     fun parseBlog(scrapTime: String, data: Map<String, *>, meta: Map<String, *>): Boolean {
@@ -155,14 +192,8 @@ object FromScrappyDump {
 
         val lastScrapTime = containsMid(mid)
         if (lastScrapTime == null && rectified["content"] != null) {
-            val userQuotes = rectified.getString("content")
-                .substringBefore("//@")
-                .extractValues(quoteUserRegex)
-            val topics = rectified.getString("content")
-                .substringBefore("//@")
-                .extractValues(topicRegex)
-            WeiboManager.setList("tag", mid, userQuotes)
-            WeiboManager.setList("tag", mid, topics)
+            val tids = detectTags(rectified.getString("content"))
+            WeiboManager.setList("blog_with_tag", mid, tids)
         }
 
         if (!containsUid(uid)) {
@@ -245,6 +276,15 @@ object FromScrappyDump {
 
         val uid = MicroBlog.uidFromUserUrl(data.maybeFirstOfList("user_link"))
         rectified["uid"] = uid
+        if (!containsUid(uid)) {
+            WeiboManager.setInfo(
+                "user", uid, mapOf(
+                    "uid" to uid,
+                    "name" to "unknown_comment_user"
+                )
+            )
+        }
+
         rectified["mid"] = MicroBlog.url2codedMid(meta.getHashMap("user_data").getString("keyword"))
         val likeText = if (data["like"] != null) {
             data.maybeFirstOfList<String>("like").firstMatch(numberRegex)
@@ -315,7 +355,9 @@ object FromScrappyDump {
 
                 sqliteClient.replace("user", WeiboManager.getInfoValues("user").toList())
 
-                sqliteClient.replace("tag", WeiboManager.getFlattenList("tag", "mid", "tag"))
+                saveTags()
+
+                sqliteClient.replace("blog_with_tag", WeiboManager.getFlattenList("blog_with_tag", "mid", "tid"))
 
                 sqliteClient.replace("root", WeiboManager.getInfoValues("root").toList())
 
