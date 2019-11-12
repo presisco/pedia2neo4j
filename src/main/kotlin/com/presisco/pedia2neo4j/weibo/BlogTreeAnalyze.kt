@@ -29,43 +29,24 @@ object BlogTreeAnalyze {
     @JvmStatic
     fun main(vararg args: String) {
         val iterator = db.selectIterator("select mid, repost_id from blog")
-        val blogs = hashMapOf<String, Blog>()
-        val roots = hashMapOf<Blog, Int>()
-        while (iterator.hasNext()) {
-            val row = iterator.next()
 
-            val mid = row.getString("mid")
-            if (!blogs.containsKey(mid)) {
-                blogs[mid] = Blog(mid)
-                blogs[mid]!!.valid = true
-            }
-
-            if (row["repost_id"] != null) {
-                val repostId = row.getString("repost_id")
-                if (!blogs.containsKey(repostId)) {
-                    blogs[repostId] = Blog(repostId)
-                    roots[blogs[repostId]!!] = 0
-                } else {
-                    roots.remove(blogs[mid]!!)
-                }
-                blogs[repostId]!!.addChild(blogs[mid]!!)
-            } else {
-                roots[blogs[mid]!!] = 0
-            }
-        }
+        val woods = Blog.buildWoods(iterator)
+        val blogs = woods.first
+        val roots = woods.second
+        val rootDepths = hashMapOf<Blog, Int>()
 
         println("unique blogs: ${blogs.keys.size}")
         println("trees: ${roots.size}")
 
         val rootUpdateList = arrayListOf<Map<String, *>>()
         val blogUpdateList = arrayListOf<Map<String, String>>()
-        for (blog in roots.keys) {
-            roots[blog] = Blog.maxDepth(blog)
+        for (blog in roots) {
+            rootDepths[blog] = Blog.maxDepth(blog)
             setRootPointer(blog.mid, blog, blogUpdateList)
             rootUpdateList.add(
                 mapOf(
                     "mid" to blog.mid,
-                    "depth" to roots[blog]
+                    "depth" to rootDepths[blog]
                 )
             )
         }
@@ -82,7 +63,7 @@ object BlogTreeAnalyze {
             listOf("root_id", "mid")
         )
 
-        val depthMap = roots.entries.groupBy { it.value }.toSortedMap()
+        val depthMap = rootDepths.entries.groupBy { it.value }.toSortedMap()
 
         depthMap.forEach { (depth, mids) ->
             println("depth: $depth has ${mids.size} trees")
@@ -96,8 +77,19 @@ object BlogTreeAnalyze {
             }
             val commands = input.split(" ")
             when (commands[0]) {
-                "stages" -> println(Blog.diffusionWidth(blogs[commands[1]]!!).toString())
-                "blogs_of_depth" -> println(depthMap[commands[1].toInt()]!!.toString())
+                "stages" -> println(
+                    Blog.diffusionWidth(blogs[commands[1]]!!)
+                        .toString()
+                )
+                "blogs_of_depth" -> println(
+                    depthMap[commands[1].toInt()]!!
+                        .map { it.key.mid }
+                        .toString()
+                )
+                "longest_path" -> println(
+                    Blog.longestPath(blogs[commands[1]]!!)
+                        .toString()
+                )
                 else -> println("unknown command!")
             }
         }
