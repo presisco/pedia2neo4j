@@ -1,5 +1,6 @@
 package com.presisco.pedia2neo4j.weibo
 
+import com.presisco.gsonhelper.ListHelper
 import com.presisco.lazyjdbc.client.MapJdbcClient
 import com.presisco.pedia2neo4j.getInt
 import com.presisco.pedia2neo4j.getString
@@ -15,7 +16,7 @@ object DumpGraphToText {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:E:/database/scrappy_weibo.db",
+                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -31,6 +32,8 @@ object DumpGraphToText {
     val trainFile = "train.pairs"
 
     val testFile = "test.pairs"
+
+    val episodeFile = "episodes.txt"
 
     val relations = listOf(
         "keyword", "keyword_inv",
@@ -239,9 +242,13 @@ object DumpGraphToText {
     fun buildAnalyzeRelation(entityToIndex: Map<String, Int>): List<Triple<Int, Int, Int>> {
         val woods = Blog.buildWoods(db.selectIterator("select mid, repost_id from blog"))
         val blogs = woods.first
-        val validRoots = db.select("select mid, keyword, depth from root where depth > 3")
+        val validRoots = db.select("select mid, keyword, depth from root where depth > 1")
+
+        val interRelId = relations.indexOf("repost")
 
         val relationList = arrayListOf<Triple<Int, Int, Int>>()
+        val episodes = arrayListOf<Map<String, *>>()
+
         for (root in validRoots) {
             val rootMid = root.getString("mid")
             val keyword = root.getString("keyword").trim()
@@ -252,6 +259,7 @@ object DumpGraphToText {
             } else {
                 continue
             }
+            val relId = relations.indexOf(relation)
 
             var depth = root.getInt("depth")
             if (depth > 5) {
@@ -259,15 +267,37 @@ object DumpGraphToText {
             }
             val distantBlogs = Blog.blogsAtDistance(blogs[rootMid]!!, depth)
             distantBlogs.forEach {
+                val midMids = it.split(", ")
+                val fromId = entityToIndex["blog_$rootMid"]!!
+                val toId = entityToIndex["blog_${midMids.last()}"]!!
+                val path = arrayListOf<Int>()
+                path.add(fromId)
+                for (i in 1.until(midMids.size)) {
+                    path.add(interRelId)
+                    path.add(entityToIndex["blog_${midMids[i]}"]!!)
+                }
+                val episode = mapOf(
+                    "from_id" to fromId,
+                    "to_id" to toId,
+                    "rid" to relId,
+                    "paths" to listOf(
+                        path
+                    )
+                )
+                episodes.add(episode)
+
                 relationList.addAll(
                     buildBidirection(
-                        entityToIndex["blog_$rootMid"]!!,
-                        entityToIndex["blog_$it"]!!,
+                        fromId,
+                        toId,
                         relation
                     )
                 )
             }
         }
+        val writer = File(episodeFile).bufferedWriter()
+        writer.write(ListHelper().toJson(episodes))
+        writer.close()
         return relationList
     }
 

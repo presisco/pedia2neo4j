@@ -92,18 +92,32 @@ data class Blog(
             root: Blog,
             distance: Int,
             current: Int = 0,
-            blogs: MutableSet<String> = hashSetOf()
+            blogs: MutableSet<String> = hashSetOf(),
+            steps: String = ""
         ): Set<String> {
+            val currentSteps = if (steps == "") {
+                root.mid
+            } else {
+                steps + root.mid
+            }
 
             if (distance == current) {
-                blogs.add(root.mid)
+                blogs.add(currentSteps)
                 return emptySet()
             }
 
             if (root.childs.isEmpty())
                 return emptySet()
 
-            root.childs.forEach { blogsAtDistance(it, distance, current + 1, blogs) }
+            root.childs.forEach {
+                blogsAtDistance(
+                    it,
+                    distance,
+                    current + 1,
+                    blogs,
+                    "$currentSteps, "
+                )
+            }
 
             return if (current == 0)
                 blogs
