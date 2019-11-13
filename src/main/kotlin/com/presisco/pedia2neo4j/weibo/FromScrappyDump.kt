@@ -4,6 +4,8 @@ import com.presisco.lazyjdbc.client.MapJdbcClient
 import com.presisco.pedia2neo4j.*
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 object FromScrappyDump {
 
@@ -12,19 +14,21 @@ object FromScrappyDump {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:D:/scrappy_dump.db",
+                    "dataSource.url" to "jdbc:sqlite:E:/database/scrappy_dump.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
         )
     )
 
-    val sqliteClient = MapJdbcClient(
+    val weiboClient = MapJdbcClient(
         HikariDataSource(
             HikariConfig(
                 mapOf(
-                    "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
+                    "dataSourceClassName" to "com.mysql.cj.jdbc.MysqlDataSource",
+                    "dataSource.url" to "jdbc:mysql://localhost:3306/weibo?useUnicode=true&characterEncoding=utf-8&serverTimezone=UTC",
+                    "dataSource.user" to "root",
+                    "dataSource.password" to "experimental",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -32,9 +36,16 @@ object FromScrappyDump {
     )
 
     val numberRegex = Regex(".*?([0-9]+)")
-    val numberFromXml = Regex(">([0-9]+)<")
+    val timeFromXml = Regex("title=\"(.+?)\"")
+    val timeFromXmlText = Regex(">(.+?)</")
     val quoteUserRegex = Regex("(@\\S+)[:\\s]*")
     val topicRegex = Regex("(#.+?#)")
+    val nicknameRegex = Regex("nick-name=\"(.+?)\" ")
+
+    val scrapTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+    val timeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
 
     val repostTrees = hashMapOf<String, Blog>()
 
@@ -42,76 +53,22 @@ object FromScrappyDump {
 
     val tags = hashMapOf<String, Int>()
 
+    val blogUids = hashSetOf<String>()
+
+    val blogMids = hashSetOf<String>()
+
     init {
-        sqliteClient.executeSQL(
-            "create table if not exists blog(" +
-                    "mid text(9) not null primary key, " +
-                    "scrap_time text(20), " +
-                    "time text(16), " +
-                    "content text, " +
-                    "uid text(32) not null, " +
-                    "like integer, " +
-                    "comment integer, " +
-                    "repost integer, " +
-                    "url text not null, " +
-                    "repost_id text(9), " +
-                    "repost_link text, " +
-                    "root_id text(9))"
-        )
-        sqliteClient.executeSQL(
-            "create table if not exists user(" +
-                    "uid text(32) not null primary key, " +
-                    "name text(64))"
-        )
-        sqliteClient.executeSQL(
-            "create table if not exists tag(" +
-                    "tid integer primary key, " +
-                    "tag text)"
-        )
-        sqliteClient.executeSQL(
-            "create table if not exists blog_with_tag(" +
-                    "mid text(9) not null, " +
-                    "tid integer not null)"
-        )
-        sqliteClient.executeSQL(
-            "create table if not exists root(" +
-                    "mid text(9) not null primary key, " +
-                    "keyword text not null, " +
-                    "depth integer)"
-        )
-        sqliteClient.executeSQL(
-            "create table if not exists comment(" +
-                    "cid text(9) not null primary key, " +
-                    "mid text(9) not null, " +
-                    "like integer, " +
-                    "content text not null, " +
-                    "uid text(32) not null, " +
-                    "scrap_time text(20), " +
-                    "time text(16))"
-        )
-        sqliteClient.executeSQL(
-            "create table if not exists transfer_id(" +
-                    "max_id integer primary key)"
-        )
-        val tagIter = sqliteClient.selectIterator("select * from tag")
+        val tagIter = weiboClient.selectIterator("select * from tag")
         while (tagIter.hasNext()) {
             val row = tagIter.next()
             tags[row.getString("tag")] = row.getInt("tid")
         }
-    }
-
-    fun containsMid(mid: String): String? {
-        val result = sqliteClient.select("select scrap_time from blog where mid = ?", mid)
-        if (result.isEmpty()) {
-            return null
-        } else {
-            return result.first()["scrap_time"] as String
+        val blogIter = weiboClient.selectIterator("select mid, uid from blog")
+        while (blogIter.hasNext()) {
+            val row = blogIter.next()
+            blogMids.add(row.getString("mid"))
+            blogUids.add(row.getString("uid"))
         }
-    }
-
-    fun containsUid(uid: String): Boolean {
-        val result = sqliteClient.select("select uid from user where uid = ?", uid)
-        return result.isNotEmpty()
     }
 
     fun Map<String, *>.intOrZero(key: String): Int {
@@ -149,7 +106,57 @@ object FromScrappyDump {
                 )
             )
         }
-        sqliteClient.replace("tag", insertList)
+        weiboClient.replace("tag", insertList)
+    }
+
+    val minuteRegex = Regex("(\\d+)分钟.+?")
+    val hourRegex = Regex("(\\d+)小时.+?")
+    val hourAndMinuteDay = Regex("今天\\s?(\\d{2}):(\\d{2}).*")
+    val monthAndDayRegex = Regex("(\\d+)月(\\d+)日 (\\d{2}):(\\d{2}).*")
+    val validOutputFormat = Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}")
+
+    fun String.toSystemMs() = LocalDateTime.parse(this, scrapTimeFormatter)
+
+    fun alignTime(scrapTime: String, time: String): String {
+        val scrapDateTime = scrapTime.toSystemMs()
+
+        return if (time.contains("刚刚")) {
+            timeFormatter.format(scrapDateTime)
+        } else if (time.contains("秒")) {
+            timeFormatter.format(scrapDateTime)
+        } else if (time.contains("分钟前")) {
+            timeFormatter.format(
+                scrapDateTime.minusMinutes(
+                    time.firstMatch(minuteRegex)!!.toLong()
+                )
+            )
+        } else if (time.contains("小时前")) {
+            timeFormatter.format(
+                scrapDateTime.minusHours(
+                    time.firstMatch(hourRegex)!!.toLong()
+                )
+            )
+        } else if (time.contains("今天")) {
+            val values = hourAndMinuteDay.matchEntire(time)!!.groupValues
+            timeFormatter.format(
+                scrapDateTime.withHour(values[1].toInt())
+                    .withMinute(values[2].toInt())
+            )
+        } else if (time.contains("年")) {
+            time.replace("年", "-")
+                .replace("月", "-")
+                .replace("日", "")
+        } else if (time.contains(monthAndDayRegex)) {
+            val values = monthAndDayRegex.matchEntire(time)!!.groupValues
+            timeFormatter.format(
+                scrapDateTime.withMonth(values[1].toInt())
+                    .withDayOfMonth(values[2].toInt())
+                    .withHour(values[3].toInt())
+                    .withMinute(values[4].toInt())
+            )
+        } else {
+            time
+        }
     }
 
     fun parseBlog(scrapTime: String, data: Map<String, *>, meta: Map<String, *>): Boolean {
@@ -176,33 +183,69 @@ object FromScrappyDump {
         rectified["mid"] = mid
         val uid = MicroBlog.uidFromBlogUrl(data["url"] as String)
         rectified["uid"] = uid
-        val username = data["user"]
-        if (data.containsKey("create_time")) {
-            rectified["time"] = data["create_time"]
+        val username = if (data["name"] != null) {
+            if (data.getString("name").contains("<a ")) {
+                data.getString("name").extractValues(nicknameRegex).first().trim()
+            } else {
+                data.getString("name").trim()
+            }
+        } else if (data["user"] != null) {
+            data.getString("user").trim()
         } else {
-            rectified["time"] = data.getString("time")
-                .substringAfter("\">")
-                .substringBefore("</a>")
-                .trim()
+            "unknown"
         }
-        if (data["create_time"] == null) {
-            println("unknown time!")
+
+        if (username != null && username.length > 30) {
+            println("username: $username too long!")
         }
+
+        if (data.containsKey("create_time")) {
+            val timeString = data["create_time"] as String?
+            if (timeString == null) {
+                rectified["time"] = "unknown"
+            } else if (timeString.contains("<div")) {
+                rectified["time"] = data.getString("create_time").extractValues(timeFromXml)
+                    .first()
+                    .trim()
+            } else {
+                rectified["time"] = timeString
+            }
+        } else if (data.containsKey("time")) {
+            val timeString = data.getString("time").replace("\n", "")
+            if (timeString.contains("<a")) {
+                rectified["time"] = timeString.extractValues(timeFromXmlText)
+                    .first()
+                    .substringBefore(" 转赞人数")
+                    .trim()
+            } else {
+                rectified["time"] = timeString.trim()
+            }
+        } else {
+            return false
+        }
+
+        rectified["time"] = alignTime(scrapTime, rectified.getString("time"))
+        if (!rectified.getString("time").matches(validOutputFormat)
+            && rectified.getString("time") != "unknown"
+        ) {
+            println("bad time: ${rectified.getString("time")}")
+        }
+
         rectified["scrap_time"] = scrapTime
 
-        val lastScrapTime = containsMid(mid)
-        if (lastScrapTime == null && rectified["content"] != null) {
+        if (!blogMids.contains(mid) && rectified["content"] != null) {
             val tids = detectTags(rectified.getString("content"))
             WeiboManager.setList("blog_with_tag", mid, tids)
         }
 
-        if (!containsUid(uid)) {
+        if (!blogUids.contains(uid)) {
             WeiboManager.setInfo(
                 "user", uid, mapOf(
                     "uid" to uid,
                     "name" to username
                 )
             )
+            blogUids.add(uid)
         }
 
         val source = meta.getHashMap("user_data").getString("keyword")
@@ -228,17 +271,16 @@ object FromScrappyDump {
                 repostTrees[mid] = Blog(mid)
             }
             repostTrees[mid]!!.valid = true
-            if (lastScrapTime == null) {
-                WeiboManager.setInfo(
-                    "root", mid, mapOf(
-                        "mid" to mid,
-                        "keyword" to source
-                    )
+            WeiboManager.setInfo(
+                "root", mid, mapOf(
+                    "mid" to mid,
+                    "keyword" to source
                 )
-            }
+            )
             roots.add(repostTrees[mid]!!)
         }
         WeiboManager.setInfo("blog", mid, rectified)
+        blogMids.add(mid)
         return true
     }
 
@@ -262,13 +304,17 @@ object FromScrappyDump {
         if (data["create_time"] == null) {
             rectified["time"] = null
         } else {
-            val timeString = data.maybeFirstOfList<String>("create_time")
-            rectified["time"] = if (timeString.startsWith("<div")) {
+            var timeString = data.maybeFirstOfList<String>("create_time")
+            timeString = if (timeString.startsWith("<div")) {
                 timeString.substringAfter(">")
                     .substringBefore("<")
             } else {
                 timeString
             }
+            if (timeString.contains("楼")) {
+                timeString = timeString.substringAfter("楼 ")
+            }
+            rectified["time"] = timeString
         }
 
         rectified["scrap_time"] = scrapTime
@@ -276,7 +322,7 @@ object FromScrappyDump {
 
         val uid = MicroBlog.uidFromUserUrl(data.maybeFirstOfList("user_link"))
         rectified["uid"] = uid
-        if (!containsUid(uid)) {
+        if (!blogUids.contains(uid)) {
             WeiboManager.setInfo(
                 "user", uid, mapOf(
                     "uid" to uid,
@@ -303,15 +349,10 @@ object FromScrappyDump {
 
     @JvmStatic
     fun main(vararg args: String) {
-        val idRecord = sqliteClient.select("select max(max_id) earliest from transfer_id")
-        var earliestId = if (idRecord.isNotEmpty()) {
-            idRecord.first().getInt("earliest")
-        } else {
-            -1
-        }
+        var earliestId = -1
         println("starting at id: ${earliestId + 1}")
         val iterator = scrappyClient.selectIterator(
-            1000,
+            200000,
             "select * from data " +
                     "where id > $earliestId"
         )
@@ -349,27 +390,23 @@ object FromScrappyDump {
             }
 
             if (counter % 500000 == 0) {
-                sqliteClient.replace("blog", WeiboManager.getInfoValues("blog").toList())
+                weiboClient.replace("blog", WeiboManager.getInfoValues("blog").toList())
 
-                sqliteClient.replace("comment", WeiboManager.getInfoValues("comment").toList())
+                weiboClient.replace("comment", WeiboManager.getInfoValues("comment").toList())
 
-                sqliteClient.replace("user", WeiboManager.getInfoValues("user").toList())
+                weiboClient.replace("blog_user", WeiboManager.getInfoValues("user").toList())
 
                 saveTags()
 
-                sqliteClient.replace("blog_with_tag", WeiboManager.getFlattenList("blog_with_tag", "mid", "tid"))
+                weiboClient.replace("blog_with_tag", WeiboManager.getFlattenList("blog_with_tag", "mid", "tid"))
 
-                sqliteClient.replace("root", WeiboManager.getInfoValues("root").toList())
+                weiboClient.replace("root", WeiboManager.getInfoValues("root").toList())
 
                 WeiboManager.reset()
             }
         }
 
         println("max id: $maxId, read $counter records!")
-
-        if (maxId != 0L) {
-            sqliteClient.insert("transfer_id", listOf(mapOf("max_id" to maxId)))
-        }
 
         println("unique blogs: ${repostTrees.keys.size}")
         println("trees: ${roots.size}")

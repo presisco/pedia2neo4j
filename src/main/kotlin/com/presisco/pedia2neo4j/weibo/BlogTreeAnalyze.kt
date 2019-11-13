@@ -1,7 +1,6 @@
 package com.presisco.pedia2neo4j.weibo
 
 import com.presisco.lazyjdbc.client.MapJdbcClient
-import com.presisco.pedia2neo4j.getString
 import com.presisco.pedia2neo4j.toProperties
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -13,8 +12,10 @@ object BlogTreeAnalyze {
         HikariDataSource(
             HikariConfig(
                 mapOf(
-                    "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
+                    "dataSourceClassName" to "com.mysql.cj.jdbc.MysqlDataSource",
+                    "dataSource.url" to "jdbc:mysql://localhost:3306/weibo?useUnicode=true&characterEncoding=utf-8&serverTimezone=UTC",
+                    "dataSource.user" to "root",
+                    "dataSource.password" to "experimental",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -42,6 +43,11 @@ object BlogTreeAnalyze {
         val blogUpdateList = arrayListOf<Map<String, String>>()
         for (blog in roots) {
             rootDepths[blog] = Blog.maxDepth(blog)
+            blogUpdateList.add(
+                mapOf(
+                    "mid" to blog.mid, "root_id" to blog.mid
+                )
+            )
             setRootPointer(blog.mid, blog, blogUpdateList)
             rootUpdateList.add(
                 mapOf(
@@ -73,7 +79,7 @@ object BlogTreeAnalyze {
         while (true) {
             val input = keyboard.nextLine()
             if (input == "quit") {
-                break;
+                break
             }
             val commands = input.split(" ")
             when (commands[0]) {

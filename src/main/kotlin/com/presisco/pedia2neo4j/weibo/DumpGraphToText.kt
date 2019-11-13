@@ -16,7 +16,7 @@ object DumpGraphToText {
             HikariConfig(
                 mapOf(
                     "dataSourceClassName" to "org.sqlite.SQLiteDataSource",
-                    "dataSource.url" to "jdbc:sqlite:scrappy_weibo.db",
+                    "dataSource.url" to "jdbc:sqlite:E:/database/scrappy_weibo.db",
                     "maximumPoolSize" to "1"
                 ).toProperties()
             )
@@ -33,7 +33,7 @@ object DumpGraphToText {
 
     val testFile = "test.pairs"
 
-    val episodeFile = "episodes.txt"
+    val episodeFile = "episodes.json"
 
     val relations = listOf(
         "keyword", "keyword_inv",
@@ -295,6 +295,7 @@ object DumpGraphToText {
                 )
             }
         }
+        episodes.shuffle()
         val writer = File(episodeFile).bufferedWriter()
         writer.write(ListHelper().toJson(episodes))
         writer.close()

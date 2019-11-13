@@ -124,5 +124,24 @@ data class Blog(
             else
                 emptySet()
         }
+
+        fun averageNeighbors(
+            root: Blog,
+            depth: Int = 0,
+            neighbors: MutableSet<Int> = mutableSetOf()
+        ): Int {
+            if (root.childs.isEmpty()) {
+                return 0
+            }
+
+            neighbors.add(root.childs.size)
+            root.childs.forEach { averageNeighbors(it, depth + 1, neighbors) }
+
+            return if (depth == 0) {
+                neighbors.average().toInt()
+            } else {
+                0
+            }
+        }
     }
 }
